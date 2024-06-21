@@ -59,7 +59,7 @@
 
 
     ;;Condicionales
-    (expresion ("if" expresion "{" expresion  "else" expresion "}") if-exp)
+    (expresion ("if" expresion "{" expresion "elif" expresion "{" expresion "}" "else" expresion "}") if-exp)
 
 
     ;;Iteradores
@@ -165,15 +165,7 @@
         (true-exp () #t)
         (false-exp () #f)
       ))
-      (begin-exp (expresion xs) 
-                 (let loop ((acumulador (evaluar-expresion expresion env))
-                             (xs xs))
-                    (if (null? xs) 
-                        acumulador
-                        (loop (evaluar-expresion (car xs) 
-                                               env)
-                              (cdr xs)))))
-      (var-exp (identificador) (apply-envy env identificador))
+      (var-exp (id) (apply-env env id))
       (num-exp (n) (
         cases numero-exp n
         (decimal-num (n) n)
@@ -182,22 +174,6 @@
         (hex-num (n) (string->symbol n))
         (float-num (n) n)
       ))
-      ;;;;;;;;;;;;;;FOR
-      (for-exp (ix fromx untilx byx exp)
-               (let loop(
-                 (env (extend-env (list ix) (list (evaluar-expresion fromx env)) env))
-                 (until (evaluar-expresion untilx))
-                 (by (evaluar-expresion byx))
-                 (returm  ('void)))
-                 (let ((iterador (apply-envy env ix)))
-                 (if (< iterador until)
-                     (let* ((do (evaluar-expresion exp env))
-                            (ambiente-nuevo (extend-env (list ix) (list (+ iterador by))env)))
-                          (set! returm do)
-                            (loop ambiente-nuevo until by returm))returm))))
-               
-      
-                            
       (cadena-exp (id lids) (
         let loop( [values lids]
                   [acc (symbol->string id)]
@@ -206,32 +182,32 @@
                   [(null? values) acc]
                   [else (loop (cdr values) (string-append acc " " (symbol->string (car values))))])
       ))
-      (decl-exp (declaracion) (
-        cases var-decl declaracion
-        (lvar-exp (identificadores valores cuerpo)
-               (let ((vals (eval-rands valores env)))
-                 (evaluar-expresion cuerpo
-                                  (extend-env identificadores vals env))))
-        (let-exp (identificadores valores cuerpo)
-               (let ((vals (eval-rands valores env)))
-                 (evaluar-expresion cuerpo
-                                  (extend-env identificadores vals env))))
+      (decl-exp (decl) (
+        cases var-decl decl
+        (lvar-exp (ids rands body)
+               (let ((args (eval-rands rands env)))
+                 (evaluar-expresion body
+                                  (extend-env ids args env))))
+
+        ;;;Revisar el Let para que no acepte set
+        (let-exp (ids rands body)
+               (let ((args (eval-rands rands env)))
+                 (evaluar-expresion body
+                                  (extend-env ids args env))))
       ))
-       (array-exp (lexp) '())
-      
-      (cons-exp (exp1 exp2) '())
       (lista-exp (lexp) '())
+      (cons-exp (exp1 exp2) '())
       (empty-list-exp () '())
-     
+      (array-exp (lexp) '())
       
      
-      ;;set expresion marlon
-      (set-exp (identificadores expresions)
+     ;; Revisar set
+      (set-exp (id rhs-exp)
                (begin
                  (setref!
-                  (apply-env-ref env identificadores)
-                  (evaluar-expresion expresions env))
-                 "variable cambiada"))
+                  (apply-env-ref env id)
+                  (evaluar-expresion rhs-exp env))
+                 1));;devuelve 1 para indicar que la operación se realizó correctamente.
       (prim-num-exp (exp1 prim exp2) 
       ;;donde dice apply-binarios poner apply-num-prim para que funcione
       (cond
@@ -245,29 +221,38 @@
         (rest-primList () '())
         (empty-primList () '())
       ))
-      (prim-array-exp (prim lexp) '())
-      
+      (prim-array-exp (prim lexp) (
+        cases primitivaArray prim
+        (length-primArr () '())
+        (index-primArr () '())
+        (slice-primArr () '())
+        (setlist-primArr () '()) ))
+      (prim-cad-exp (prim lexp) '())
       (if-exp (test-exp true-exp false-exp)
               (if (evaluar-expresion test-exp env)
                   (evaluar-expresion true-exp env)
-                  (evaluar-expresion false-exp env)))
+                  (evaluar-expresion false-exp env)))6
 
-      
+      (begin-exp (exp exps) 
+                 (let loop ((acc (evaluar-expresion exp env))
+                             (exps exps))
+                    (if (null? exps) 
+                        acc
+                        (loop (evaluar-expresion (car exps) 
+                                               env)
+                              (cdr exps)))))
 
 
 
-      
+      (for-exp (id from-exp until-exp by-exp do-exp) '())
       (while-exp (exp1 exp2) '())
-      (func-exp (lids exp) '())
       (switch-exp (exp lexp1 lexp2  default-exp) '())
-      (get-struct-exp (exp id ) '())
+      (func-exp (lids exp) '())
       (call-exp (exp lexp) '())
-      (prim-cad-exp (prim lexp) '())
       (new-struct-exp (id lexp) '())
-      (match-exp (exp1 lregular-exp exp2) '())
+      (get-struct-exp (exp id ) '())
       (set-struct-exp (exp1 id exp2) '())
-      
-      
+      (match-exp (exp1 lregular-exp exp2) '())
     ))
 )
 
@@ -420,8 +405,8 @@
 (define init-env
   (lambda ()
     (extend-env
-     '(a b c i)
-     '(2 3 4 0)
+     '(a b c)
+     '(2 3 4)
      (empty-env))))
 
 ;El Interpretador (FrontEnd + Evaluación + señal para lectura +
@@ -473,9 +458,11 @@
 
 
 ;función que busca un símbolo en un ambiente
-(define apply-envy
-  (lambda (envy s)
-    (refer (apply-env-ref envy s))))
+(define apply-env
+  (lambda (env sym)
+    (deref (apply-env-ref env sym))))
+     ;(apply-env-ref env sym)))
+    ;env))
 (define apply-env-ref
   (lambda (env sym)
     (cases environment env
@@ -495,25 +482,25 @@
   (a-ref (position integer?)
          (vec vector?)))
 
-(define refer
-  (lambda (r)
-    (prim-refer r)))
+(define deref
+  (lambda (ref)
+    (primitive-deref ref)))
 
-(define prim-refer
-  (lambda (r)
-    (cases reference r
+(define primitive-deref
+  (lambda (ref)
+    (cases reference ref
       (a-ref (pos vec)
              (vector-ref vec pos)))))
 
 (define setref!
-  (lambda (r v)
-    (prim-seref r v)))
+  (lambda (ref val)
+    (primitive-setref! ref val)))
 
-(define prim-seref
-  (lambda (r v)
-    (cases reference r
-      (a-ref (pos vt)
-             (vector-set! vt pos v)))))
+(define primitive-setref!
+  (lambda (ref val)
+    (cases reference ref
+      (a-ref (pos vec)
+             (vector-set! vec pos val)))))
 
 
 ;****************************************************************************************
@@ -541,4 +528,4 @@
                 #f))))))
 
 
-(interpretador)
+;;(interpretador)
